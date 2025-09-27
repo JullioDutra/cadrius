@@ -113,5 +113,4 @@ def mock_extract_fields_from_text(text: str, schema: type[BaseModel], **kwargs) 
     return None
 
 # No código de Juliano, ele pode usar uma variável de ambiente para chavear 
-# entre a função real e o mock durante os testes.
-# nbla bla bla
+# entre a função real e o mock durante os testes!.
