@@ -99,38 +99,20 @@ def test_tasks_functionality():
     else:
         print("Nenhum email disponivel para teste")
     
-    # Testa criacao de email de teste
-    print("\n=== TESTE: CRIACAO DE EMAIL DE TESTE ===")
-    if mailboxes.exists():
-        mailbox = mailboxes.first()
+    # Testa processamento do email existente
+    print("\n=== TESTE: PROCESSAMENTO DE EMAIL EXISTENTE ===")
+    if emails.exists():
+        test_email = emails.first()
+        print(f"Usando email existente ID: {test_email.id}")
+        print(f"Status atual: {test_email.status}")
         
-        # Cria um email de teste
-        test_email = EmailMessage.objects.create(
-            mailbox=mailbox,
-            message_id="test-message-123",
-            subject="Teste de Processamento",
-            sender="teste@exemplo.com",
-            received_at=datetime.now(),
-            body_text="""
-            Prezados,
-            
-            Gostaria de solicitar um novo servico para nossa empresa:
-            
-            Cliente: Empresa Teste Ltda
-            Servico: Desenvolvimento de sistema de teste
-            Prioridade: Media
-            Prazo: 15 dias uteis
-            Contato: (11) 99999-0000
-            
-            Aguardo retorno.
-            Atenciosamente,
-            Usuario Teste
-            """,
-            status=EmailStatus.PENDING,
-            processing_attempts=0
-        )
+        # Reseta o email para PENDING para testar novamente
+        test_email.status = EmailStatus.PENDING
+        test_email.processing_attempts = 0
+        test_email.extracted_data = None
+        test_email.save()
+        print("Email resetado para PENDING")
         
-        print(f"Email de teste criado com ID: {test_email.id}")
         print(f"Subject: {test_email.subject}")
         print(f"Status: {test_email.status}")
         print(f"Body length: {len(test_email.body_text)} caracteres")
@@ -157,6 +139,8 @@ def test_tasks_functionality():
             print(f"ERRO no processamento: {e}")
             import traceback
             traceback.print_exc()
+    else:
+        print("Nenhum email disponivel para teste")
     
     print("\n" + "=" * 50)
     print("Teste concluido!")
