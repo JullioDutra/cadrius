@@ -7,6 +7,8 @@ from django.utils import timezone
 from django.db import IntegrityError
 from django_q.tasks import async_task
 import imapclient # Para fetch_emails
+from extraction.schemas import ProcessoJuridicoSchema 
+
 
 from email import policy
 from email.parser import BytesParser
@@ -355,7 +357,7 @@ def fetch_emails(mailbox_id: int) -> int:
                         email_msg = EmailMessage.objects.create(**payload)
                         total_created += 1
                         processed_uids.append(_safe_int(uid))
-                        async_task('tasks.process_email', email_msg.id)
+                        async_task('tasks.tasks.process_email', email_msg.id)
                     except IntegrityError:
                         logger.info("Email duplicado (uid=%s, mailbox=%s) - ignorando.", uid, mailbox_id)
                         processed_uids.append(_safe_int(uid))
@@ -400,24 +402,35 @@ def fetch_emails(mailbox_id: int) -> int:
 def process_email(email_id):
     """
     Worker principal: coordena a extração de IA e as integrações externas.
-    FLUXO ATUALIZADO: Extração -> Persistência -> Notificação Telegram.
     """
     try:
         email = EmailMessage.objects.get(pk=email_id)
+        
+        # --- GARANTA QUE ESTAS LINHAS ESTÃO ATIVAS ---
         email.status = EmailStatus.PROCESSING
         email.processing_attempts += 1
         email.save()
+        # ----------------------------------------------
         
         # 1. EXTRAÇÃO DE DADOS (Juliano)
         logger.info(f"Iniciando extração IA para email ID: {email.id}")
         
+        # --- PROMPT MELHORADO ---
+        prompt_juridico = (
+            "Você é um assistente jurídico especializado em analisar intimações e despachos de tribunais brasileiros. "
+            "Sua tarefa é extrair as seguintes informações do texto abaixo de forma precisa e objetiva. "
+            "Se um prazo for mencionado em dias, calcule a data final a partir da data de hoje "
+            f"({timezone.now().strftime('%d/%m/%Y')}) e retorne no formato AAAA-MM-DD. "
+            "A sugestão de próximo passo deve ser uma ação prática e direta."
+        )
+
         extracted_data = extract_fields_from_text(
             text=email.body_text,
-            schema=ServiceOrderSchema, 
-            prompt_template="Extraia os campos de pedido a seguir...",
+            # --- USE O NOVO SCHEMA ---
+            schema=ProcessoJuridicoSchema, 
+            prompt_template=prompt_juridico,
             examples=[]
         )
-        
         if extracted_data is None:
             # Fallback (Marcar para Revisão)
             email.status = EmailStatus.REQUIRES_REVIEW
@@ -431,23 +444,28 @@ def process_email(email_id):
         email.save()
         
         # 2. INTEGRAÇÕES (Thales)
-        
-        # --- BLOCO TRELLO REMOVIDO/IGNORADO ---
-        # Removida a chamada: create_trello_card(extracted_data)
-        
-        # Telegram (Manter apenas a Notificação)
         logger.info(f"Iniciando notificação Telegram para email ID: {email.id}")
         
-        # Montar a mensagem com os dados essenciais
+        # --- MENSAGEM DO TELEGRAM ATUALIZADA ---
+        proc_numero = extracted_data.get('numero_processo', 'N/A')
+        movimento = extracted_data.get('resumo_movimentacao', 'Sem resumo.')
+        sugestao = extracted_data.get('sugestao_proximo_passo', 'Revisão manual necessária.')
+        prazo = extracted_data.get('prazo_fatal', None)
+
+        # Formata a data do prazo para o padrão brasileiro
+        prazo_formatado = f"*{prazo}*" if prazo else "_Não identificado_"
+
         message = (
-            f"**🤖 Novo Processo Automatizado**\n"
-            f"**Assunto:** {email.subject}\n"
-            f"**Status da Extração:** SUCESSO\n"
-            f"**Prioridade Sugerida:** {extracted_data.get('priority', 'N/A')}"
+            f"⚖️ **Nova Movimentação Processual**\n\n"
+            f"**Processo:** `{proc_numero}`\n"
+            f"**Assunto do E-mail:** {email.subject}\n\n"
+            f"**Resumo da IA:**\n_{movimento}_\n\n"
+            f"**Prazo Fatal:** {prazo_formatado}\n\n"
+            f"**➡️ Próximo Passo Sugerido:**\n`{sugestao}`"
         )
         
-        notify_telegram(email_msg=email, message=message) 
-        
+        notify_telegram(email_msg=email, message=message)   
+             
         # 3. FINALIZAÇÃO
         email.status = EmailStatus.INTEGRATED # O ciclo completo (Extraído + Notificado) foi concluído
         email.last_processed_at = timezone.now()

@@ -71,7 +71,7 @@ def extract_fields_from_text(
             validated_model = schema.model_validate_json(raw_json_output)
             
             # Retorna o modelo validado como um dicionário Python
-            return validated_model.model_dump() 
+            return validated_model.model_dump(mode='json')
 
         except json.JSONDecodeError:
             logger.error(f"Tentativa {attempt + 1}: Resposta da IA não é um JSON válido.")

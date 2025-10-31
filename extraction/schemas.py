@@ -19,6 +19,33 @@ class ExtractedData(BaseModel):
     )
 
 
+class ProcessoJuridicoSchema(ExtractedData):
+    """
+    Schema para extrair dados de e-mails de movimentação processual.
+    """
+    document_type: Literal['MOVIMENTACAO_PROCESSUAL']
+
+    numero_processo: str = Field(
+        description="Número único do processo, no formato NNNNNNN-DD.AAAA.J.TR.OOOO."
+    )
+    
+    tipo_movimentacao: str = Field(
+        description="Tipo de documento ou ato processual (ex: Intimação, Despacho, Decisão, Sentença)."
+    )
+
+    resumo_movimentacao: str = Field(
+        description="Um resumo curto e objetivo do que se trata a movimentação."
+    )
+
+    prazo_fatal: date | None = Field(
+        default=None, 
+        description="A data final para o cumprimento do prazo, se houver. Formato: AAAA-MM-DD."
+    )
+
+    sugestao_proximo_passo: str = Field(
+        description="Sugestão de ação clara e objetiva para o advogado (ex: 'Preparar recurso de apelação', 'Dar ciência', 'Agendar pagamento de custas')."
+    )
+
 # --- 1. Exemplo de Pedido de Serviço (SERVICE_ORDER) ---
 
 class ServiceOrderSchema(ExtractedData):
