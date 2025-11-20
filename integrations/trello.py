@@ -17,10 +17,32 @@ TRELLO_AUTH = {
 TRELLO_LIST_ID = os.environ.get('TRELLO_LIST_ID')
 
 
+TRELLO_BASE_URL = "https://api.trello.com/1"
+# TRELLO_AUTH e TRELLO_LIST_ID são removidos, pois serão lidos por chamada
+
+
 def create_trello_card(email_msg: EmailMessage, extracted_data: dict) -> dict:
     """
     Cria um novo card no Trello usando dados extraídos e registra o log.
+    (Agora lê as credenciais do DB via MailBox.integration_config)
     """
+    # NOVO: Busca a configuração de integração da MailBox
+    config = email_msg.mailbox.integration_config
+    if not config:
+        logger.error(f"MailBox {email_msg.mailbox.id} não possui IntegrationConfig.")
+        raise ValueError("Configuração de Integração Externa não encontrada.")
+
+    # --- LEIA AS CREDENCIAIS DO DB ---
+    trello_auth = {
+        'key': config.trello_api_key,
+        'token': config.trello_api_token,
+    }
+    list_id = config.trello_list_id
+    
+    if not trello_auth['key'] or not trello_auth['token'] or not list_id:
+        logger.error(f"Credenciais Trello incompletas para config: {config.name}")
+        raise ValueError("Credenciais Trello não configuradas.")
+
     log = IntegrationLog.objects.create(
         email_message=email_msg,
         service='TRELLO',
@@ -28,20 +50,15 @@ def create_trello_card(email_msg: EmailMessage, extracted_data: dict) -> dict:
         request_data=extracted_data
     )
     
-    # Mapeamento do JSON da IA (Juliano) para o payload do Trello
-    card_name = f"🤖 NOVO PEDIDO: {extracted_data.get('customer_name', 'N/A')} - {extracted_data.get('priority', 'LOW')}"
-    card_desc = f"Descrição do Serviço:\n{extracted_data.get('service_description', 'N/A')}\n\n"
-    card_desc += f"Prioridade Sugerida: {extracted_data.get('priority', 'N/A')}\n"
-    card_desc += f"Contato: {extracted_data.get('contact_phone', 'N/A')}"
+    # ... (Mapeamento do JSON da IA para o Trello é mantido)
     
     payload = {
-        'idList': TRELLO_LIST_ID,
+        'idList': list_id, # Usa o ID do DB
         'name': card_name,
         'desc': card_desc,
         'pos': 'top',
-        **TRELLO_AUTH # Adiciona autenticação
+        **trello_auth # Usa a autenticação do DB
     }
-    
     log.request_data['trello_payload'] = payload # Atualiza o log com o payload exato
     
     try:

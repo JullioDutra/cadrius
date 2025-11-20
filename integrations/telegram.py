@@ -12,18 +12,24 @@ logger = logging.getLogger(__name__)
 def notify_telegram(email_msg: EmailMessage, message: str, chat_id: str = None) -> dict:
     """
     Envia uma notificação formatada para o Telegram e registra o log.
+    (Agora lê as credenciais do DB via MailBox.integration_config)
     """
-    # --- LEIA AS VARIÁVEIS DE AMBIENTE AQUI DENTRO ---
-    bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    # NOVO: Busca a configuração de integração da MailBox
+    config = email_msg.mailbox.integration_config
+    if not config:
+        logger.error(f"MailBox {email_msg.mailbox.id} não possui IntegrationConfig.")
+        raise ValueError("Configuração de Integração Externa não encontrada.")
+
+    # --- LEIA AS VARIÁVEIS DO DB ---
+    bot_token = config.telegram_bot_token
     
-    # Use o chat_id passado como argumento ou pegue do ambiente
-    target_chat_id = chat_id or os.environ.get('TELEGRAM_CHAT_ID')
+    # Use o chat_id passado como argumento ou pegue do DB
+    target_chat_id = chat_id or config.telegram_chat_id
     
     # --- Validação ---
     if not bot_token or not target_chat_id:
-        logger.error("Credenciais do Telegram (BOT_TOKEN ou CHAT_ID) não encontradas nas variáveis de ambiente.")
-        # Você pode optar por não levantar um erro para não quebrar o fluxo todo
-        # e apenas logar, mas por enquanto vamos parar aqui para debugar.
+        logger.error(f"Credenciais do Telegram incompletas para config: {config.name}")
+        # ... (restante da validação)
         raise ValueError("Credenciais do Telegram não configuradas.")
 
     # --- MONTE A URL AQUI DENTRO ---

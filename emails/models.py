@@ -1,3 +1,5 @@
+# julliodutra/cadrius/cadrius-d2664e7d9d3cdaaeb4729d29c9fafb13438707c0/emails/models.py
+
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -18,7 +20,17 @@ class MailBox(models.Model):
     """
     Define a caixa de entrada de onde os emails são buscados.
     Responsabilidade: Jullio (Modelagem) e Thales (Uso no Worker IMAP).
+    
     """
+    
+    user = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='mailboxes', 
+        verbose_name="Proprietário"
+    )
+    
+    
     name = models.CharField(max_length=100, unique=True, verbose_name="Nome da Caixa")
     # Para simplificar, armazenaremos as credenciais diretamente aqui, 
     # mas em produção deve-se usar um Secret Manager.
@@ -26,6 +38,27 @@ class MailBox(models.Model):
     imap_port = models.IntegerField(default=993)
     username = models.CharField(max_length=255)
     password = models.CharField(max_length=255) # Campo para a senha
+    
+    
+    
+    
+    # NOVO CAMPO (Correção Circular: Usando string de referência 'integrations.IntegrationConfig')
+    integration_config = models.ForeignKey(
+        'integrations.IntegrationConfig', # Usando string reference
+        on_delete=models.SET_NULL, 
+        null=True, blank=True, 
+        related_name='mailboxes',
+        verbose_name="Configuração de Integração Externa"
+    )
+    
+    # NOVO CAMPO (Correção Circular: Usando string de referência 'extraction.ExtractionProfile')
+    extraction_profile = models.ForeignKey(
+        'extraction.ExtractionProfile', # Usando string reference
+        on_delete=models.SET_NULL, 
+        null=True, blank=True, 
+        related_name='mailboxes',
+        verbose_name="Perfil de Extração de IA"
+    )
     
     last_fetch_at = models.DateTimeField(null=True, blank=True, verbose_name="Última Busca")
     is_active = models.BooleanField(default=True)
@@ -92,6 +125,70 @@ class EmailMessage(models.Model):
         self.status = EmailStatus.PENDING
         self.processing_attempts += 1
         self.save()
-        # Thales precisará enfileirar a tarefa aqui:
-        # from django_q.tasks import async_task
-        # async_task('tasks.process_email', self.id)
+        
+        
+        
+class AutomationRule(models.Model):
+    """
+    Define a lógica de negócio de um cliente: SE (condição) ENTAO (perfil IA).
+    Permite que o sistema reaja a diferentes tipos de e-mail na mesma MailBox.
+    """
+    # Multi-Tenancy: A regra é do usuário
+    user = models.ForeignKey(
+        'auth.User', # Usamos 'auth.User' para evitar importar get_user_model() se já não estiver
+        on_delete=models.CASCADE, 
+        related_name='automation_rules', 
+        verbose_name="Proprietário"
+    )
+    
+    # A regra se aplica a uma Caixa de E-mail
+    mailbox = models.ForeignKey(
+        'MailBox', # Linka à MailBox onde a regra se aplica
+        on_delete=models.CASCADE, 
+        related_name='rules',
+        verbose_name="Caixa de E-mail Alvo"
+    )
+    
+    name = models.CharField(max_length=100, verbose_name="Nome da Regra")
+    priority = models.IntegerField(default=10, help_text="Prioridade de execução. Menor número é executado primeiro.")
+    is_active = models.BooleanField(default=True)
+
+    # CONDIÇÃO: Filtro básico de e-mail (SE)
+    subject_contains = models.CharField(
+        max_length=255, 
+        blank=True, 
+        null=True, 
+        help_text="Texto que o Assunto DEVE conter (deixe vazio para ignorar)."
+    )
+    sender_contains = models.CharField(
+        max_length=255, 
+        blank=True, 
+        null=True, 
+        help_text="Texto que o Remetente DEVE conter (deixe vazio para ignorar)."
+    )
+    
+    # AÇÃO: O que fazer se a condição for atendida (ENTÃO)
+    # O perfil de extração define o Schema Pydantic e o Prompt
+    extraction_profile = models.ForeignKey(
+        'extraction.ExtractionProfile', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        verbose_name="Perfil de Extração (IA) a ser usado"
+    )
+    
+    # Futuramente: Ações de integração adicionais podem ser definidas aqui
+    action_config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Configurações para ações pós-extração (ex: Trello, Telegram)."
+    )
+    
+    class Meta:
+        verbose_name = "Regra de Automação"
+        verbose_name_plural = "Regras de Automação"
+        ordering = ['priority', 'name']
+        # Garante que não haja duas regras com o mesmo nome na mesma MailBox
+        unique_together = ('mailbox', 'name') 
+
+    def __str__(self):
+        return f'{self.name} ({self.mailbox.name})'

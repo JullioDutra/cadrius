@@ -51,9 +51,12 @@ INSTALLED_APPS = [
     'integrations',
     'extraction',
     'tasks',
+    
+    'corsheaders',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -184,3 +187,14 @@ IMAP_HOST = os.environ.get('IMAP_HOST')
 IMAP_PORT = os.environ.get('IMAP_PORT', 993)
 IMAP_USERNAME = os.environ.get('IMAP_USERNAME')
 IMAP_PASSWORD = os.environ.get('IMAP_PASSWORD')
+
+
+
+CORS_ALLOW_ALL_ORIGINS = False # Sempre defina como False em produção
+
+# A lista de domínios/origens permitidas.
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    # Adicione aqui o seu domínio de produção/staging quando for o caso
+]

@@ -1,30 +1,36 @@
-# tasks/tasks.py
-
 import os
 import logging
 from datetime import timedelta
 from django.utils import timezone
 from django.db import IntegrityError
 from django_q.tasks import async_task
-import imapclient # Para fetch_emails
-from extraction.schemas import ProcessoJuridicoSchema 
-
+import imapclient 
+from extraction.schemas import ProcessoJuridicoSchema, ServiceOrderSchema, SupportRequestSchema 
 
 from email import policy
 from email.parser import BytesParser
 from email.header import decode_header, make_header
 from email.utils import parsedate_to_datetime
 
-# Importa os modelos de Jullio
-from emails.models import MailBox, EmailMessage, EmailStatus
-# Importa a lógica de processamento
-from integrations.telegram import notify_telegram # Manter apenas o Telegram
-# Removida a importação do Trello: 
-# from integrations.trello import create_trello_card 
+# --- IMPORTS ATUALIZADOS ---
+# Importa os modelos, incluindo o novo AutomationRule
+from emails.models import MailBox, EmailMessage, EmailStatus, AutomationRule 
+# Importa a lógica de processamento e os wrappers
+from integrations.telegram import notify_telegram 
 from extraction.ai_wrapper import extract_fields_from_text 
-from extraction.schemas import ServiceOrderSchema 
+# Importa o modelo de perfil de Juliano
+from extraction.models import ExtractionProfile 
 
 logger = logging.getLogger(__name__)
+
+
+# NOVO: Mapeamento para buscar a classe do schema pelo nome
+SCHEMA_MAP = {
+    'ProcessoJuridicoSchema': ProcessoJuridicoSchema,
+    'ServiceOrderSchema': ServiceOrderSchema,
+    'SupportRequestSchema': SupportRequestSchema,
+    # Adicionar novos schemas aqui
+}
 
 
 
@@ -165,15 +171,20 @@ def _touch_mailbox_checkpoint(mailbox: MailBox, processed_uids):
 
 
 # ----------------- FUNÇÃO PRINCIPAL -----------------
-def fetch_emails(mailbox_id: int) -> int:
+def fetch_emails(mailbox_id) -> int: 
     """
     Lê emails via IMAP e cria EmailMessage para cada mensagem nova.
-    - Usa MailBox.imap_host / imap_port / username / password (sem espaços na app password).
-    - Pasta padrão: INBOX (campo 'folder' é opcional).
-    - Deduplica por UID (se EmailMessage tiver 'uid') e por Message-ID.
-    - Atualiza last_fetch_at/last_checked se existirem.
-    - Dispara async_task('tasks.process_email', email_msg.id).
+    - Argumento (mailbox_id) vem como string do Django-Q Schedule.
     """
+    # NOVO: Garante que o ID seja um inteiro, se o Django-Q passar como string
+    try:
+        mailbox_id = int(mailbox_id)
+    except (ValueError, TypeError):
+        msg = f"[fetch_emails] ID inválido recebido: {mailbox_id}"
+        logger.error(msg)
+        notify_telegram(msg)
+        return 0
+        
     server = None
     processed_uids = []
     total_created = 0
@@ -195,7 +206,7 @@ def fetch_emails(mailbox_id: int) -> int:
         folder = getattr(mailbox, "folder", None) or "INBOX"
         last_uid = getattr(mailbox, "last_uid", None)
 
-                # ---- OVERRIDE via variáveis de ambiente ----
+        # ---- OVERRIDE via variáveis de ambiente ----
         env_host = os.getenv("IMAP_HOST")
         env_port = os.getenv("IMAP_PORT")
         env_user = os.getenv("IMAP_USERNAME")
@@ -357,6 +368,7 @@ def fetch_emails(mailbox_id: int) -> int:
                         email_msg = EmailMessage.objects.create(**payload)
                         total_created += 1
                         processed_uids.append(_safe_int(uid))
+                        # Enfileira o processamento para a próxima etapa (Juliano/Thales)
                         async_task('tasks.tasks.process_email', email_msg.id)
                     except IntegrityError:
                         logger.info("Email duplicado (uid=%s, mailbox=%s) - ignorando.", uid, mailbox_id)
@@ -402,72 +414,130 @@ def fetch_emails(mailbox_id: int) -> int:
 def process_email(email_id):
     """
     Worker principal: coordena a extração de IA e as integrações externas.
+    Agora usa o modelo AutomationRule para definir o fluxo dinamicamente.
     """
     try:
         email = EmailMessage.objects.get(pk=email_id)
         
-        # --- GARANTA QUE ESTAS LINHAS ESTÃO ATIVAS ---
+        # 1. ATUALIZA STATUS INICIAL
         email.status = EmailStatus.PROCESSING
         email.processing_attempts += 1
         email.save()
-        # ----------------------------------------------
         
-        # 1. EXTRAÇÃO DE DADOS (Juliano)
-        logger.info(f"Iniciando extração IA para email ID: {email.id}")
+        # 2. BUSCA E AVALIA AS REGRAS DE AUTOMAÇÃO
         
-        # --- PROMPT MELHORADO ---
-        prompt_juridico = (
-            "Você é um assistente jurídico especializado em analisar intimações e despachos de tribunais brasileiros. "
-            "Sua tarefa é extrair as seguintes informações do texto abaixo de forma precisa e objetiva. "
-            "Se um prazo for mencionado em dias, calcule a data final a partir da data de hoje "
-            f"({timezone.now().strftime('%d/%m/%Y')}) e retorne no formato AAAA-MM-DD. "
-            "A sugestão de próximo passo deve ser uma ação prática e direta."
-        )
+        # Busca todas as regras ativas para a MailBox, ordenadas por prioridade
+        rules = AutomationRule.objects.filter(
+            mailbox=email.mailbox, 
+            is_active=True
+        ).order_by('priority')
 
-        extracted_data = extract_fields_from_text(
-            text=email.body_text,
-            # --- USE O NOVO SCHEMA ---
-            schema=ProcessoJuridicoSchema, 
-            prompt_template=prompt_juridico,
-            examples=[]
-        )
-        if extracted_data is None:
-            # Fallback (Marcar para Revisão)
+        matched_rule = None
+        for rule in rules:
+            # Lógica de correspondência de assunto
+            subject_match = True
+            if rule.subject_contains and rule.subject_contains.strip():
+                if rule.subject_contains.lower() not in email.subject.lower():
+                    subject_match = False
+            
+            # Lógica de correspondência de remetente
+            sender_match = True
+            if rule.sender_contains and rule.sender_contains.strip():
+                if rule.sender_contains.lower() not in email.sender.lower():
+                    sender_match = False
+                    
+            if subject_match and sender_match:
+                matched_rule = rule
+                logger.info(f"Regra de Automação correspondente encontrada: {rule.name}")
+                break
+        
+        if not matched_rule:
+            # Não encontrou regra, ignora e marca como pendente (ou adiciona status 'IGNORED')
+            email.status = EmailStatus.PENDING 
+            email.save()
+            logger.info(f"Nenhuma regra de automação correspondente encontrada para o email ID: {email.id}")
+            return
+            
+        # 3. EXTRAÇÃO DE DADOS (Juliano) usando o perfil da regra
+        profile = matched_rule.extraction_profile
+        if not profile:
+            msg = f"Regra '{matched_rule.name}' não possui Perfil de Extração. Requer Revisão."
+            logger.error(msg)
             email.status = EmailStatus.REQUIRES_REVIEW
             email.save()
-            # Notificação opcional para equipe de QA/Revisão
-            notify_telegram(email_msg=email, message=f"Revisão necessária para email ID: {email.id}. Extração IA falhou.")
+            notify_telegram(email_msg=email, message=msg)
+            return
+
+        schema_cls = SCHEMA_MAP.get(profile.pydantic_schema_name)
+        if not schema_cls:
+            msg = f"Schema '{profile.pydantic_schema_name}' não encontrado no mapeamento. Falha Crítica."
+            logger.error(msg)
+            email.status = EmailStatus.FAILED
+            email.save()
+            notify_telegram(email_msg=email, message=msg)
+            return
+            
+        # Usa o prompt template do DB
+        dynamic_prompt = profile.system_prompt_template.format(
+            data_atual=timezone.now().strftime('%d/%m/%Y')
+        )
+
+        logger.info(f"Iniciando extração IA para email ID: {email.id} usando perfil: {profile.name}")
+        
+        extracted_data = extract_fields_from_text(
+            text=email.body_text,
+            schema=schema_cls, 
+            prompt_template=dynamic_prompt, 
+            examples=[]
+        )
+        
+        if extracted_data is None:
+            email.status = EmailStatus.REQUIRES_REVIEW
+            email.save()
+            notify_telegram(email_msg=email, message=f"Revisão necessária para email ID: {email.id}. Extração IA falhou para perfil '{profile.name}'.")
             return
 
         email.extracted_data = extracted_data
         email.status = EmailStatus.EXTRACTED
         email.save()
         
-        # 2. INTEGRAÇÕES (Thales)
+        # 4. INTEGRAÇÕES (Thales) - Chamada de Integrações
+        
         logger.info(f"Iniciando notificação Telegram para email ID: {email.id}")
         
-        # --- MENSAGEM DO TELEGRAM ATUALIZADA ---
-        proc_numero = extracted_data.get('numero_processo', 'N/A')
-        movimento = extracted_data.get('resumo_movimentacao', 'Sem resumo.')
-        sugestao = extracted_data.get('sugestao_proximo_passo', 'Revisão manual necessária.')
-        prazo = extracted_data.get('prazo_fatal', None)
-
-        # Formata a data do prazo para o padrão brasileiro
-        prazo_formatado = f"*{prazo}*" if prazo else "_Não identificado_"
-
-        message = (
-            f"⚖️ **Nova Movimentação Processual**\n\n"
-            f"**Processo:** `{proc_numero}`\n"
-            f"**Assunto do E-mail:** {email.subject}\n\n"
-            f"**Resumo da IA:**\n_{movimento}_\n\n"
-            f"**Prazo Fatal:** {prazo_formatado}\n\n"
-            f"**➡️ Próximo Passo Sugerido:**\n`{sugestao}`"
-        )
+        # Formatação de Mensagem (Adaptação para o Processo Jurídico ou Genérico)
         
+        if profile.pydantic_schema_name == 'ProcessoJuridicoSchema':
+            proc_numero = extracted_data.get('numero_processo', 'N/A')
+            movimento = extracted_data.get('resumo_movimentacao', 'Sem resumo.')
+            sugestao = extracted_data.get('sugestao_proximo_passo', 'Revisão manual necessária.')
+            prazo = extracted_data.get('prazo_fatal', None)
+
+            prazo_formatado = f"*{prazo}*" if prazo else "_Não identificado_"
+
+            message = (
+                f"⚖️ **Nova Movimentação Processual (Regra: {matched_rule.name})**\n\n"
+                f"**Processo:** `{proc_numero}`\n"
+                f"**Assunto do E-mail:** {email.subject}\n\n"
+                f"**Resumo da IA:**\n_{movimento}_\n\n"
+                f"**Prazo Fatal:** {prazo_formatado}\n\n"
+                f"**➡️ Próximo Passo Sugerido:**\n`{sugestao}`"
+            )
+        else:
+            document_type = extracted_data.get('document_type', 'Dados Extraídos')
+            confidence = extracted_data.get('confidence_score', 'N/A')
+            
+            message = (
+                f"✅ **Extração Concluída ({document_type}) - Regra: {matched_rule.name}**\n\n"
+                f"**Assunto:** {email.subject}\n"
+                f"**Confiança da IA:** {confidence}%\n\n"
+                f"Dados extraídos salvos para processamento adicional."
+            )
+            
         notify_telegram(email_msg=email, message=message)   
              
-        # 3. FINALIZAÇÃO
-        email.status = EmailStatus.INTEGRATED # O ciclo completo (Extraído + Notificado) foi concluído
+        # 5. FINALIZAÇÃO
+        email.status = EmailStatus.INTEGRATED 
         email.last_processed_at = timezone.now()
         email.save()
         
@@ -475,6 +545,10 @@ def process_email(email_id):
         logger.error(f"EmailMessage {email_id} não encontrado.")
     except Exception as e:
         # Lógica de erro: marcar como FAILED e logar
-        email.status = EmailStatus.FAILED
-        email.save()
-        logger.exception(f"Erro crítico no processamento do email {email_id}: {e}")
+        try:
+            email.status = EmailStatus.FAILED
+            email.save()
+            logger.exception(f"Erro crítico no processamento do email {email_id}: {e}")
+            notify_telegram(email_msg=email, message=f"⚠️ Erro Crítico no pipeline para email ID: {email.id}. Detalhes: {e}")
+        except Exception:
+            logger.exception(f"Erro duplo no processamento e no logging do email {email_id}")
