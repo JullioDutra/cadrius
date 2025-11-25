@@ -29,8 +29,12 @@ class MailBoxViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated] 
 
     def get_queryset(self):
-        # FILTRO DE MULTI-TENANCY: Apenas caixas de e-mail do usuário logado
-        if self.request.user.is_superuser: # Opcional: superusuários veem tudo
+        # --- CORREÇÃO PARA O SWAGGER ---
+        if getattr(self, 'swagger_fake_view', False):
+            return MailBox.objects.none()
+        # -------------------------------
+
+        if self.request.user.is_superuser:
             return MailBox.objects.all().order_by('name')
         return MailBox.objects.filter(user=self.request.user).order_by('name')
 
@@ -72,8 +76,8 @@ class EmailMessageViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, view
 
     def get_queryset(self):
         # FILTRO DE MULTI-TENANCY: Apenas e-mails das caixas do usuário logado
-        if self.request.user.is_superuser:
-            queryset = EmailMessage.objects.all().order_by('-received_at')
+        if getattr(self, 'swagger_fake_view', False):
+                    return EmailMessage.objects.none()
         else:
             # Filtra e-mails onde a MailBox.user é o usuário logado
             queryset = EmailMessage.objects.filter(
@@ -128,8 +132,8 @@ class IntegrationConfigViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # FILTRO DE MULTI-TENANCY
-        if self.request.user.is_superuser:
-            return IntegrationConfig.objects.all().order_by('name')
+        if getattr(self, 'swagger_fake_view', False):
+            return IntegrationConfig.objects.none()
         return IntegrationConfig.objects.filter(user=self.request.user).order_by('name')
 
     def perform_create(self, serializer):
@@ -146,8 +150,8 @@ class ExtractionProfileViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # FILTRO DE MULTI-TENANCY
-        if self.request.user.is_superuser:
-            return ExtractionProfile.objects.all().order_by('name')
+        if getattr(self, 'swagger_fake_view', False):
+                    return ExtractionProfile.objects.none()
         return ExtractionProfile.objects.filter(user=self.request.user).order_by('name')
 
     def perform_create(self, serializer):
@@ -167,8 +171,8 @@ class AutomationRuleViewSet(viewsets.ModelViewSet):
         queryset = AutomationRule.objects.all().order_by('priority', 'name')
         
         # FILTRO DE MULTI-TENANCY: Apenas regras criadas pelo usuário.
-        if not self.request.user.is_superuser:
-            queryset = queryset.filter(user=self.request.user)
+        if getattr(self, 'swagger_fake_view', False):
+                    return AutomationRule.objects.none()
             
         # Filtro opcional: filtrar por mailbox
         mailbox_id = self.request.query_params.get('mailbox_id')

@@ -7,6 +7,7 @@ from rest_framework import routers
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 from rest_framework import permissions
+from core.views import DashboardStatsView
 
 # Importações corretas das Views criadas no passo anterior
 from core.views import (
@@ -63,6 +64,7 @@ urlpatterns = [
     path('api/v1/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/v1/auth/register/', RegisterUserView.as_view(), name='user_register'),
     path('api/v1/auth/user/', GetUserProfileView.as_view(), name='user_profile'),
+    path('api/v1/dashboard/stats/', DashboardStatsView.as_view(), name='dashboard_stats'),
 
     # --- Documentação ---
     re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),

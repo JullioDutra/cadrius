@@ -7,6 +7,8 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated 
 
 from emails.serializers import UserRegistrationSerializer, UserProfileSerializer
+from emails.models import EmailMessage, AutomationRule, EmailStatus
+from django.utils import timezone
 
 # --- 1. VIEWS DE NAVEGAÇÃO (FRONTEND) ---
 
@@ -81,3 +83,39 @@ class GetUserProfileView(APIView):
     def get(self, request):
         serializer = UserProfileSerializer(request.user)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    
+class DashboardStatsView(APIView):
+    """
+    Retorna contagens e estatísticas para o Dashboard.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        
+        # Filtros baseados no usuário (Multi-tenancy)
+        if user.is_superuser:
+            automations_qs = AutomationRule.objects.all()
+            emails_qs = EmailMessage.objects.all()
+        else:
+            automations_qs = AutomationRule.objects.filter(user=user)
+            # emails via mailbox do usuário
+            emails_qs = EmailMessage.objects.filter(mailbox__user=user)
+
+        # 1. Automações Ativas
+        active_automations = automations_qs.filter(is_active=True).count()
+
+        # 2. Processos Ativos (Emails Extraídos com Sucesso)
+        active_processes = emails_qs.filter(status=EmailStatus.EXTRACTED).count()
+
+        # 3. Emails processados hoje (Simulação de 'Prazos Hoje')
+        today = timezone.now().date()
+        emails_today = emails_qs.filter(received_at__date=today).count()
+
+        return Response({
+            "automacoes_ativas": active_automations,
+            "processos_ativos": active_processes,
+            "prazos_hoje": emails_today,
+            "tempo_economizado": f"{active_processes * 0.5}h" # Estimativa: 30min por processo
+        })
