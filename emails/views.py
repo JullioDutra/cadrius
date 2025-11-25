@@ -168,22 +168,22 @@ class AutomationRuleViewSet(viewsets.ModelViewSet):
     
     # Customiza o queryset para permitir filtros de mailbox
     def get_queryset(self):
-        queryset = AutomationRule.objects.all().order_by('priority', 'name')
-        
-        # FILTRO DE MULTI-TENANCY: Apenas regras criadas pelo usuário.
         if getattr(self, 'swagger_fake_view', False):
-                    return AutomationRule.objects.none()
-            
+            return AutomationRule.objects.none()
+
+        # 1. Inicia o queryset base filtrando pelo usuário logado (Multi-tenancy)
+        if self.request.user.is_superuser:
+            queryset = AutomationRule.objects.all()
+        else:
+            queryset = AutomationRule.objects.filter(user=self.request.user)
+
         # Filtro opcional: filtrar por mailbox
         mailbox_id = self.request.query_params.get('mailbox_id')
         if mailbox_id:
-            # Garante que a mailbox pertence ao usuário
-            if not self.request.user.is_superuser:
-                queryset = queryset.filter(mailbox__id=mailbox_id, mailbox__user=self.request.user)
-            else:
-                queryset = queryset.filter(mailbox__id=mailbox_id)
-            
-        return queryset
+            # O queryset base já está filtrado por usuário, então o filtro de mailbox é seguro
+            queryset = queryset.filter(mailbox__id=mailbox_id)
+
+        return queryset.order_by('priority', 'name')
 
     def perform_create(self, serializer):
         # GARANTE QUE O USUÁRIO LOGADO SEJA O PROPRIETÁRIO
