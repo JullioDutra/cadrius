@@ -97,10 +97,55 @@ class AutomationRuleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = AutomationRule
-        fields = ['id', 'name', 'mailbox', 'mailbox_name', 'priority', 'is_active', 
-                  'subject_contains', 'sender_contains', 'extraction_profile', 'extraction_profile_name', 
-                  'action_config', 'user']
-        read_only_fields = ['user', 'mailbox_name', 'extraction_profile_name']
+        fields = [
+            'id', 
+            'name', 
+            'mailbox', 
+            'mailbox_name', 
+            'priority', 
+            'is_active', 
+            'subject_contains', 
+            'sender_contains', 
+            'extraction_profile', 
+            'extraction_profile_name', 
+            'action_config', 
+            'user'
+        ]
+        
+        read_only_fields = [
+            'id', 
+            'user', 
+            'mailbox', 
+            'mailbox_name', 
+            'extraction_profile', 
+            'extraction_profile_name'
+        ]
+
+
+class CommunicationFlowRuleSerializer(serializers.ModelSerializer):
+    """
+    Serializer simplificado para regras de automação dentro do fluxo de comunicação.
+    """
+    extraction_profile_name = serializers.CharField(source='extraction_profile.name', read_only=True, default=None)
+
+    class Meta:
+        model = AutomationRule
+        fields = ['id', 'name', 'is_active', 'priority', 'extraction_profile_name']
+
+
+class CommunicationFlowSerializer(serializers.ModelSerializer):
+    """
+    Serializer principal para a tela de "Comunicação".
+    Mostra a Mailbox e suas regras de automação aninhadas.
+    """
+    rules = CommunicationFlowRuleSerializer(many=True, read_only=True)
+    
+    integration_config_name = serializers.CharField(source='integration_config.name', read_only=True, default=None)
+
+    class Meta:
+        model = MailBox
+        fields = ['id', 'name', 'is_active', 'integration_config_name', 'rules']
+
 
 class IntegrationLogSerializer(serializers.ModelSerializer):
     """

@@ -5,8 +5,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response 
 from rest_framework import status 
 from rest_framework.permissions import AllowAny, IsAuthenticated 
-
-from emails.serializers import UserRegistrationSerializer, UserProfileSerializer
+from emails.models import MailBox
+from emails.serializers import UserRegistrationSerializer, UserProfileSerializer, CommunicationFlowSerializer
 from emails.models import EmailMessage, AutomationRule, EmailStatus
 from django.utils import timezone
 
@@ -82,6 +82,24 @@ class GetUserProfileView(APIView):
 
     def get(self, request):
         serializer = UserProfileSerializer(request.user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class CommunicationFlowView(APIView):
+    """
+    Retorna a estrutura de dados para a tela de "Comunicação",
+    mostrando como Mailboxes e Regras de Automação se conectam.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        
+        # Busca as mailboxes do usuário, otimizando a busca por dados relacionados
+        # com prefetch_related para evitar múltiplas queries ao banco.
+        queryset = MailBox.objects.filter(user=user).prefetch_related('rules', 'rules__extraction_profile', 'integration_config').order_by('name')
+        
+        serializer = CommunicationFlowSerializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     
