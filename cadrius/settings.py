@@ -47,6 +47,7 @@ INSTALLED_APPS = [
 
     # Local apps (Jullio - Defina conforme o plano)
     'core',
+    'accounts',
     'emails',
     'integrations',
     'extraction',
