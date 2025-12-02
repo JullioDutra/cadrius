@@ -6,7 +6,6 @@ from rest_framework.response import Response
 from rest_framework import status 
 from rest_framework.permissions import AllowAny, IsAuthenticated 
 
-from emails.serializers import UserRegistrationSerializer, UserProfileSerializer
 from emails.models import EmailMessage, AutomationRule, EmailStatus
 from django.utils import timezone
 
@@ -55,36 +54,6 @@ def health_check(request):
         "app_version": "v1.0.0"
     })
 
-class RegisterUserView(APIView):
-    """
-    Endpoint de cadastro de novos usuários.
-    """
-    permission_classes = [AllowAny]
-    serializer_class = UserRegistrationSerializer
-
-    def post(self, request):
-        serializer = self.serializer_class(data=request.data)
-        
-        if serializer.is_valid():
-            user = serializer.save()
-            return Response(
-                {"detail": "Usuário criado com sucesso.", "user_id": user.id}, 
-                status=status.HTTP_201_CREATED
-            )
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-class GetUserProfileView(APIView):
-    """
-    Endpoint para retornar os dados do usuário logado (protegido por JWT).
-    """
-    permission_classes = [IsAuthenticated] 
-
-    def get(self, request):
-        serializer = UserProfileSerializer(request.user)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-    
-    
 class DashboardStatsView(APIView):
     """
     Retorna contagens e estatísticas para o Dashboard.

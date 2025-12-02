@@ -2,22 +2,21 @@
 
 from django.contrib import admin
 from django.urls import path, include, re_path
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework import routers
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
-from rest_framework import permissions
+from rest_framework import permissions 
 from core.views import DashboardStatsView
 
 # Importações corretas das Views criadas no passo anterior
-from core.views import (
-    health_check, 
-    login_view, 
-    register_view, 
-    dashboard_view,
-    RegisterUserView, 
-    GetUserProfileView
+from core.views import ( # Views de páginas/core
+    health_check,
+    login_view,
+    register_view,
+    dashboard_view
 )
+from accounts.views import RegisterUserView, GetUserProfileView, CustomTokenObtainPairView # Novas views de usuário
 
 from emails.views import (
     MailBoxViewSet, 
@@ -60,10 +59,10 @@ urlpatterns = [
     path('api/v1/', include(router.urls)),
 
     # --- Autenticação API (JWT) ---
-    path('api/v1/auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/v1/auth/token/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'), # Rota corrigida
     path('api/v1/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('api/v1/auth/register/', RegisterUserView.as_view(), name='user_register'),
-    path('api/v1/auth/user/', GetUserProfileView.as_view(), name='user_profile'),
+    path('api/v1/auth/register/', RegisterUserView.as_view(), name='user_register'), # Rota corrigida
+    path('api/v1/auth/user/', GetUserProfileView.as_view(), name='user_profile'), # Rota corrigida
     path('api/v1/dashboard/stats/', DashboardStatsView.as_view(), name='dashboard_stats'),
 
     # --- Documentação ---

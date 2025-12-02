@@ -192,3 +192,5 @@ class AutomationRule(models.Model):
 
     def __str__(self):
         return f'{self.name} ({self.mailbox.name})'
+
+# Create your models here.

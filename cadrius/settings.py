@@ -47,6 +47,7 @@ INSTALLED_APPS = [
 
     # Local apps (Jullio - Defina conforme o plano)
     'core',
+    'accounts',
     'emails',
     'integrations',
     'extraction',
@@ -91,8 +92,12 @@ WSGI_APPLICATION = 'cadrius.wsgi.application'
 # Jullio: Configuração para usar SQLite localmente.
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'cadrius',      # Ex: 'meuprojetodb'
+        'USER': 'jullio',      # Ex: 'djangouser'
+        'PASSWORD': 'jd@CS1397', # Sua senha
+        'HOST': 'localhost',               # Onde o servidor PostgreSQL está rodando (pode ser um IP)
+        'PORT': '5432',                    # A porta padrão do PostgreSQL
     }
 }
 # Sugestão: Usar django-environ ou dj-database-url para configurar Postgres
